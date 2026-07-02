@@ -39,11 +39,18 @@
               <div class="scan-beam" id="scanBeam"></div>
               <div class="scanner-row">
                 <svg class="lock-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FF6A1C" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                <input id="urlInput" type="text" placeholder="https://suspicious-link.com/verify-account" autocomplete="off" />
-                <button class="btn-primary scan-btn" id="scanBtn" onclick="startScan()">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                  SCAN
-                </button>
+
+{{-- SUBMITING URL --}}
+<form method="POST" action="{{ route('urlscan') }}" style="display: flex; gap: 0.5rem; align-items: center; width: 100%;">
+  @csrf
+  <input id="urlInput" type="text" placeholder="https://suspicious-link.com" autocomplete="off" name="url"/>
+  <button class="btn-primary scan-btn" style="white-space: nowrap; padding: .65rem 1.2rem; font-size: .78rem; border-radius: .4rem; display: inline-flex; align-items: center; gap: 0.4rem;">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    SCAN
+  </button>
+</form>
+
+                {{-- FORM FININSH --}}
                 <div class="scanning-ind" id="scanningInd">
                   <div class="orbit-ring"></div>
                   <span class="mono">SCANNING</span>
@@ -52,12 +59,7 @@
             </div>
             <p class="url-error mono" id="urlError"></p>
 
-            <div class="example-urls">
-              <span class="mono muted">Try: </span>
-              <button class="ex-btn mono" onclick="setExample('https://paypa1-secure-login.com/verify')">https://paypa1-secure-login.com/verify</button>
-              <button class="ex-btn mono" onclick="setExample('https://google.com')">https://google.com</button>
-              <button class="ex-btn mono" onclick="setExample('http://192.168.1.1/bank-login')">http://192.168.1.1/bank-login</button>
-            </div>
+            
 
             <!-- Layer progress -->
             <div class="layer-progress" id="layerProgress">
@@ -74,7 +76,7 @@
         </div>
 
         <div class="scroll-hint">
-          <span class="mono" style="font-size:.55rem;letter-spacing:.3em;color:#555">SCROLL TO EXPLORE</span>
+          <span class="mono" style="font-size:.55rem;letter-spacing:.3em;color:#555;margin-top:80px">SCROLL TO EXPLORE</span>
           <div class="scroll-line"></div>
         </div>
       </section>

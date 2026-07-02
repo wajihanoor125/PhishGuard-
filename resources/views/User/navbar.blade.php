@@ -73,7 +73,7 @@
         </div>
       </div>
       <div class="footer-bottom">
-        <span class="mono">© 2024 PhishGuard PK. Free forever. No tracking.</span>
+        <span class="mono">© 2026 PhishGuard PK. Free forever. No tracking.</span>
         <span class="mono">Built with ❤️ in Pakistan 🇵🇰</span>
       </div>
     </div>
