@@ -11,26 +11,30 @@ class UrlPatternAnalyzer
     private array  $flags = [];
     private int    $score = 0;
 
-    public function analyze(string $url): array
-    {
-        $this->url    = $url;
-        $this->scheme = strtolower(parse_url($url, PHP_URL_SCHEME) ?? '');
-        $this->host   = strtolower(parse_url($url, PHP_URL_HOST)   ?? '');
-        $this->path   = strtolower(parse_url($url, PHP_URL_PATH)   ?? '');
+   public function analyze(string $url): array
+{
+    // These MUST be reset here — if the class is instantiated once
+    // and called twice, old flags carry over
+    $this->flags = [];
+    $this->score = 0;
 
-        $this->checkHttps();
-        $this->checkUrlLength();
-        $this->checkSuspiciousKeywords();
-        $this->checkIpAddress();
-        $this->checkSubdomains();
+    $this->url    = $url;
+    $this->scheme = strtolower(parse_url($url, PHP_URL_SCHEME) ?? '');
+    $this->host   = strtolower(parse_url($url, PHP_URL_HOST)   ?? '');
+    $this->path   = strtolower(parse_url($url, PHP_URL_PATH)   ?? '');
 
-        return [
-            'flags'       => $this->flags,
-            'flag_count'  => count($this->flags),
-            'risk_score'  => min($this->score, 40), // max 40 points from pattern check
-        ];
-    }
+    $this->checkHttps();
+    $this->checkUrlLength();
+    $this->checkSuspiciousKeywords();
+    $this->checkIpAddress();
+    $this->checkSubdomains();
 
+    return [
+        'flags'      => $this->flags,
+        'flag_count' => count($this->flags),
+        'risk_score' => min($this->score, 40),
+    ];
+}
     // ─── Check 1: HTTPS ───────────────────────────────────────────────
 
     private function checkHttps(): void
