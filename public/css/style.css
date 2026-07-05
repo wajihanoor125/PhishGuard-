@@ -654,9 +654,11 @@ a { text-decoration: none; color: inherit; }
 .about-card p { font-size: .88rem; color: var(--muted); line-height: 1.75; }
 
 .team-grid {
-  display: grid;
+  display: flex;
   grid-template-columns: repeat(3,1fr);
   gap: 1.25rem;
+  text-align: center;
+  margin-left: 300px;
 }
 .team-card {
   background: rgba(13,13,13,.9);
@@ -665,7 +667,7 @@ a { text-decoration: none; color: inherit; }
   text-align: center;
 }
 .avatar {
-  width: 56px; height: 56px;
+  width: 65px; height: 56px;
   border-radius: 50%;
   background: linear-gradient(135deg, rgba(255,106,28,.15), rgba(255,173,51,.08));
   border: 1px solid rgba(255,106,28,.2);

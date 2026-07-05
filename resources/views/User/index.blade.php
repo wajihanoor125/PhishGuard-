@@ -218,9 +218,9 @@
           <div class="team-wrap">
             <p class="section-tag mono" style="margin-bottom:1.5rem">THE TEAM</p>
             <div class="team-grid">
-              <div class="team-card card-hover reveal"><div class="avatar">HR</div><h4>Hamza Raza</h4><p class="orange mono" style="font-size:.7rem">Founder &amp; Security Engineer</p><p class="muted" style="font-size:.8rem;margin-top:.3rem">5 years in cybersecurity, ex-NUST</p></div>
-              <div class="team-card card-hover reveal"><div class="avatar">AM</div><h4>Ayesha Malik</h4><p class="orange mono" style="font-size:.7rem">Backend Engineer</p><p class="muted" style="font-size:.8rem;margin-top:.3rem">Python, threat intelligence APIs</p></div>
-              <div class="team-card card-hover reveal"><div class="avatar">BC</div><h4>Bilal Chaudhry</h4><p class="orange mono" style="font-size:.7rem">Frontend Engineer</p><p class="muted" style="font-size:.8rem;margin-top:.3rem">React, real-time UI, animations</p></div>
+              <div class="team-card card-hover reveal"><div class="avatar">SM</div><h4>Samar Minallah</h4><p class="orange mono" style="font-size:.7rem">Founder &amp; Security Engineer</p><p class="muted" style="font-size:.8rem;margin-top:.3rem">5 years in cybersecurity, ex-NUST</p></div>
+              <div class="team-card card-hover reveal"><div class="avatar">WN</div><h4>Wajiha Noor</h4><p class="orange mono" style="font-size:.7rem">Backend Engineer</p><p class="muted" style="font-size:.8rem;margin-top:.3rem">Python, threat intelligence APIs</p></div>
+             
             </div>
           </div>
         </div>

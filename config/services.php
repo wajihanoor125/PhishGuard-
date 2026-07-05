@@ -42,4 +42,8 @@ return [
     'safe_browsing_key' => env('SAFE_BROWSING_API_KEY'),
 ],
 
+'whoapi' => [
+    'key' => env('WHOAPI_KEY'),
+],
+
 ];
