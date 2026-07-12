@@ -56,16 +56,378 @@ function initReveal() {
       }
     });
   }, { threshold: .12 });
-
   document.querySelectorAll('.reveal').forEach(el => io.observe(el));
-
-  // Also observe stat cards for counters (since they're inside reveals)
   const cio = new IntersectionObserver((entries) => {
     entries.forEach(e => {
       if (e.isIntersecting) { animateCounter(e.target); cio.unobserve(e.target); }
     });
   }, { threshold: .2 });
   document.querySelectorAll('.counter').forEach(el => cio.observe(el));
+}
+
+// ── SCANNER: INTERCEPT FORM ───────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  initReveal();
+  renderDoc('overview', document.querySelector('.docs-nav'));
+
+  const form = document.querySelector('#scanner form');
+  if (form) form.addEventListener('submit', handleScan);
+});
+
+async function handleScan(e) {
+  e.preventDefault();
+
+  const url         = document.getElementById('urlInput').value.trim();
+  const resultsDiv  = document.getElementById('scanResults');
+  const layerProg   = document.getElementById('layerProgress');
+  const scanningInd = document.getElementById('scanningInd');
+  const scanBeam    = document.getElementById('scanBeam');
+  const urlError    = document.getElementById('urlError');
+
+  if (!url) { urlError.textContent = 'Please enter a URL to scan.'; return; }
+
+  // Reset state
+  resultsDiv.innerHTML = '';
+  urlError.textContent = '';
+
+  // Show scanning UI
+  scanningInd.style.display = 'flex';
+  scanBeam.style.display    = 'block';
+  layerProg.style.display   = 'block';
+
+  // Animate all 4 layer dots to "checking"
+  for (let i = 0; i < 4; i++) {
+    const dot = document.getElementById(`ld${i}`);
+    const stat = document.getElementById(`ls${i}`);
+    dot.style.background = '#FFAD33';
+    dot.style.boxShadow  = '0 0 8px #FFAD33';
+    stat.textContent     = 'CHECKING...';
+    stat.style.color     = '#FFAD33';
+  }
+
+  try {
+    const csrf = document.querySelector('meta[name="csrf-token"]')?.content;
+
+    const response = await fetch('/api/url', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        ...(csrf ? { 'X-CSRF-TOKEN': csrf } : {})
+      },
+      body: JSON.stringify({ url })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      urlError.textContent = data.errors?.url?.[0] || 'Invalid URL. Please check and try again.';
+      resetScanState();
+      return;
+    }
+
+    // Update layer dots with real results
+    updateLayerDots(data);
+
+    // Brief pause so user sees the results, then render
+    setTimeout(() => {
+      scanningInd.style.display = 'none';
+      scanBeam.style.display    = 'none';
+      renderResults(data, resultsDiv);
+    }, 900);
+
+  } catch (err) {
+    urlError.textContent = 'Connection failed. Please try again.';
+    resetScanState();
+  }
+}
+
+function resetScanState() {
+  document.getElementById('scanningInd').style.display  = 'none';
+  document.getElementById('scanBeam').style.display     = 'none';
+  document.getElementById('layerProgress').style.display = 'none';
+}
+
+function updateLayerDots(data) {
+  const layers = [
+    data.virustotal_result,
+    data.google_sb_result,
+    data.domain_age_result,
+    data.pattern_result
+  ];
+
+  layers.forEach((result, i) => {
+    const dot  = document.getElementById(`ld${i}`);
+    const stat = document.getElementById(`ls${i}`);
+    dot.style.animation = 'none';
+
+    if (!result || result.status === 'error') {
+      dot.style.background = '#FF3B3B';
+      dot.style.boxShadow  = '0 0 8px #FF3B3B';
+      stat.textContent     = 'ERROR';
+      stat.style.color     = '#FF3B3B';
+    } else if (result.status === 'unknown') {
+      dot.style.background = '#666';
+      dot.style.boxShadow  = 'none';
+      stat.textContent     = 'UNKNOWN';
+      stat.style.color     = '#666';
+    } else if (result.verdict === 'malicious' || result.verdict === 'suspicious' || result.flagged || result.is_impersonating) {
+      dot.style.background = '#FF6A1C';
+      dot.style.boxShadow  = '0 0 8px #FF6A1C';
+      stat.textContent     = 'THREAT FOUND';
+      stat.style.color     = '#FF6A1C';
+    } else if (result.verdict === 'caution' || result.is_new) {
+      dot.style.background = '#FFAD33';
+      dot.style.boxShadow  = '0 0 8px #FFAD33';
+      stat.textContent     = 'CAUTION';
+      stat.style.color     = '#FFAD33';
+    } else {
+      dot.style.background = '#00D084';
+      dot.style.boxShadow  = '0 0 8px #00D084';
+      stat.textContent     = 'CLEAN';
+      stat.style.color     = '#00D084';
+    }
+  });
+}
+
+// ── RESULTS RENDERER ──────────────────────────────────────────────────────────
+function renderResults(data, container) {
+  const vCfg = {
+    malicious:  { color: '#FF3B3B', bg: 'rgba(255,59,59,0.06)',   border: 'rgba(255,59,59,0.2)',   label: 'MALICIOUS'  },
+    suspicious: { color: '#FF6A1C', bg: 'rgba(255,106,28,0.06)',  border: 'rgba(255,106,28,0.2)',  label: 'SUSPICIOUS' },
+    caution:    { color: '#FFAD33', bg: 'rgba(255,173,51,0.06)',  border: 'rgba(255,173,51,0.2)',  label: 'CAUTION'    },
+    safe:       { color: '#00D084', bg: 'rgba(0,208,132,0.06)',   border: 'rgba(0,208,132,0.2)',   label: 'SAFE'       },
+  };
+  const v     = vCfg[data.verdict] || vCfg.safe;
+  const sColor = data.risk_score >= 70 ? '#FF3B3B' : data.risk_score >= 40 ? '#FF6A1C' : data.risk_score >= 15 ? '#FFAD33' : '#00D084';
+  const scannedAt = new Date(data.scanned_at).toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' });
+
+  container.style.marginTop = '2rem';
+  container.innerHTML = `
+
+    <!-- ── VERDICT HERO ── -->
+    <div style="background:${v.bg};border:1px solid ${v.border};border-radius:1rem;padding:1.75rem 2rem;margin-bottom:1.25rem;position:relative;overflow:hidden;">
+      <div style="position:absolute;inset:0;background:radial-gradient(ellipse at top center,${v.color}06 0%,transparent 65%);pointer-events:none;"></div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1.5rem;position:relative;">
+        <!-- Left: verdict -->
+        <div style="display:flex;align-items:center;gap:1rem;">
+          <div style="width:52px;height:52px;flex-shrink:0;border-radius:50%;background:${v.bg};border:1px solid ${v.border};display:flex;align-items:center;justify-content:center;">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="${v.color}" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <div>
+            <div style="font-family:'Orbitron',sans-serif;font-size:1.5rem;font-weight:900;color:${v.color};letter-spacing:.04em;">${v.label}</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:.65rem;color:#555;margin-top:.2rem;">SCANNED · ${scannedAt} ${data.source === 'cache' ? '· <span style="color:#444">CACHED</span>' : ''}</div>
+          </div>
+        </div>
+        <!-- Right: score -->
+        <div style="text-align:center;min-width:100px;">
+          <div style="font-family:'Orbitron',sans-serif;font-size:2.4rem;font-weight:900;color:${sColor};line-height:1;">${data.risk_score}</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:.6rem;color:#555;letter-spacing:.08em;">/100 RISK SCORE</div>
+          <div style="margin-top:.5rem;height:3px;background:rgba(255,255,255,0.05);border-radius:2px;overflow:hidden;">
+            <div style="height:100%;width:0;background:${sColor};border-radius:2px;transition:width 1.2s cubic-bezier(.4,0,.2,1);" id="riskBar"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- URL row -->
+      <div style="margin-top:1.25rem;padding-top:1.25rem;border-top:1px solid rgba(255,255,255,0.05);font-family:'JetBrains Mono',monospace;font-size:.72rem;">
+        <span style="color:#444;">URL ▸ </span>
+        <span style="color:#777;word-break:break-all;">${escHtml(data.url)}</span>
+      </div>
+    </div>
+
+    <!-- ── 4 CHECK CARDS ── -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.9rem;margin-bottom:1.25rem;">
+      ${buildVtCard(data.virustotal_result)}
+      ${buildGsbCard(data.google_sb_result)}
+      ${buildDomainCard(data.domain_age_result)}
+      ${buildBrandCard(data.brand_impersonation_result)}
+    </div>
+
+    <!-- ── PATTERN FLAGS ── -->
+    ${buildPatternSection(data.pattern_result)}
+
+    <!-- ── ACTION BAR ── -->
+    <div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-top:1.25rem;padding:1.25rem 1.5rem;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:.75rem;align-items:center;justify-content:space-between;">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:.65rem;color:#444;">SCAN ID #${data.scan_id}</div>
+      <div style="display:flex;gap:.75rem;flex-wrap:wrap;">
+        <a href="/report/${data.scan_id}" target="_blank"
+           style="display:inline-flex;align-items:center;gap:.5rem;background:#FF6A1C;color:#fff;font-family:'Orbitron',sans-serif;font-size:.65rem;font-weight:700;letter-spacing:.06em;padding:.6rem 1.25rem;border-radius:.4rem;text-decoration:none;cursor:pointer;border:none;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          DOWNLOAD REPORT
+        </a>
+        <button onclick="copyShareLink('${data.scan_id}')"
+                style="display:inline-flex;align-items:center;gap:.5rem;background:transparent;color:#FF6A1C;font-family:'Orbitron',sans-serif;font-size:.65rem;font-weight:700;letter-spacing:.06em;padding:.6rem 1.25rem;border-radius:.4rem;cursor:pointer;border:1px solid rgba(255,106,28,0.35);" id="shareBtnWrap">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+          COPY SHARE LINK
+        </button>
+      </div>
+    </div>
+  `;
+
+  // Animate risk bar
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      const bar = document.getElementById('riskBar');
+      if (bar) bar.style.width = data.risk_score + '%';
+    }, 100);
+  });
+
+  container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ── CARD BUILDERS ─────────────────────────────────────────────────────────────
+
+function buildVtCard(vt) {
+  if (!vt || vt.status === 'error') {
+    return checkCard('VirusTotal', '#FF3B3B', 'ERROR',
+      'Analysis timed out',
+      `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#FF3B3B" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`,
+      'Re-scan recommended'
+    );
+  }
+  const flagged  = (vt.malicious || 0) > 0;
+  const color    = flagged ? '#FF3B3B' : '#00D084';
+  const label    = flagged ? 'FLAGGED' : 'CLEAN';
+  const icon     = flagged
+    ? `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`
+    : `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>`;
+
+  return checkCard('VirusTotal', color, label, icon,
+    `${vt.malicious || 0} malicious · ${vt.suspicious || 0} suspicious`,
+    `${vt.total_engines || 0} engines checked`
+  );
+}
+
+function buildGsbCard(gsb) {
+  if (!gsb || gsb.status === 'error') {
+    return checkCard('Google Safe Browsing', '#666', 'ERROR',
+      `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
+      'Check unavailable', ''
+    );
+  }
+  const flagged = gsb.flagged;
+  const color   = flagged ? '#FF3B3B' : '#00D084';
+  const label   = flagged ? 'THREAT' : 'CLEAN';
+  const icon    = flagged
+    ? `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>`
+    : `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>`;
+
+  return checkCard('Google Safe Browsing', color, label, icon,
+    gsb.summary || 'No data',
+    flagged ? `${(gsb.threats || []).length} threat type(s) detected` : ''
+  );
+}
+
+function buildDomainCard(domain) {
+  if (!domain || domain.status === 'error') {
+    return checkCard('Domain Age', '#666', 'ERROR',
+      `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
+      'Could not determine age', ''
+    );
+  }
+  if (domain.status === 'unknown') {
+    return checkCard('Domain Age', '#FFAD33', 'UNKNOWN',
+      `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#FFAD33" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
+      'Registration data unavailable',
+      'Treat with caution'
+    );
+  }
+  const isNew = domain.is_new;
+  const color = isNew ? '#FF6A1C' : '#00D084';
+  const label = isNew ? 'NEW DOMAIN' : 'ESTABLISHED';
+  const icon  = isNew
+    ? `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>`
+    : `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>`;
+
+  return checkCard('Domain Age', color, label, icon,
+    `Age: ${domain.age_human || 'Unknown'}`,
+    `Registrar: ${domain.registrar || 'Unknown'}`
+  );
+}
+
+function buildBrandCard(brand) {
+  if (!brand || brand.status === 'error') {
+    return checkCard('Brand Impersonation', '#666', 'ERROR',
+      `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>`,
+      'Check unavailable', ''
+    );
+  }
+  const impersonating = brand.is_impersonating;
+  const color = impersonating ? '#FF3B3B' : '#00D084';
+  const label = impersonating ? 'DETECTED' : 'NONE';
+  const icon  = impersonating
+    ? `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`
+    : `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>`;
+
+  const detail1 = impersonating ? `Impersonating: ${brand.matched_brand}` : (brand.summary || 'No brand match found');
+  const detail2 = impersonating ? `Method: ${(brand.technique || '').replace(/_/g, ' ')}` : '';
+
+  return checkCard('Brand Impersonation', color, label, icon, detail1, detail2);
+}
+
+function checkCard(name, color, label, icon, line1, line2) {
+  return `
+    <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:.75rem;padding:1.1rem 1.25rem;border-top:2px solid ${color}20;">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:.6rem;letter-spacing:.1em;color:#444;margin-bottom:.7rem;">${escHtml(name).toUpperCase()}</div>
+      <div style="display:flex;align-items:center;gap:.45rem;margin-bottom:.6rem;">
+        ${icon}
+        <span style="font-family:'Orbitron',sans-serif;font-size:.75rem;font-weight:700;color:${color};">${label}</span>
+      </div>
+      <div style="font-family:'Inter',sans-serif;font-size:.72rem;color:#666;line-height:1.5;">
+        ${escHtml(line1)}${line2 ? `<br><span style="color:#444;">${escHtml(line2)}</span>` : ''}
+      </div>
+    </div>`;
+}
+
+function buildPatternSection(pattern) {
+  if (!pattern || !pattern.flags || !pattern.flags.length) return '';
+
+  const rows = pattern.flags.map(flag => {
+    const dotColor = flag.status === 'pass' ? '#00D084' : flag.status === 'warn' ? '#FFAD33' : '#FF3B3B';
+    const msgColor = flag.status === 'pass' ? '#555' : flag.status === 'warn' ? '#FFAD33' : '#FF6A1C';
+    return `
+      <div style="display:flex;align-items:flex-start;gap:.75rem;padding:.7rem 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+        <div style="width:7px;height:7px;flex-shrink:0;border-radius:50%;background:${dotColor};margin-top:5px;box-shadow:0 0 6px ${dotColor};"></div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:.65rem;color:#555;width:110px;flex-shrink:0;padding-top:2px;">${escHtml(flag.check).toUpperCase()}</div>
+        <div style="font-family:'Inter',sans-serif;font-size:.75rem;color:${msgColor};line-height:1.5;">${escHtml(flag.message)}</div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:.75rem;padding:1.1rem 1.5rem;margin-bottom:.1rem;">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:.6rem;letter-spacing:.1em;color:#444;margin-bottom:.5rem;">URL PATTERN FLAGS · ${pattern.flag_count} checks · score +${pattern.risk_score}</div>
+      ${rows}
+    </div>`;
+}
+
+// ── SHARE LINK ────────────────────────────────────────────────────────────────
+function copyShareLink(scanId) {
+  const link = `${window.location.origin}/report/${scanId}`;
+  navigator.clipboard.writeText(link).then(() => {
+    const btn = document.getElementById('shareBtnWrap');
+    if (btn) {
+      const orig = btn.innerHTML;
+      btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> LINK COPIED`;
+      btn.style.color = '#00D084';
+      btn.style.borderColor = 'rgba(0,208,132,0.35)';
+      setTimeout(() => {
+        btn.innerHTML = orig;
+        btn.style.color = '#FF6A1C';
+        btn.style.borderColor = 'rgba(255,106,28,0.35)';
+      }, 2000);
+    }
+  });
+}
+
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+function escHtml(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 // ── DOCS ──────────────────────────────────────────────────────────────────────
@@ -87,98 +449,70 @@ const docContent = {
     <p style="color:#555;font-size:.75rem;font-family:var(--font-mono);margin-bottom:.35rem"># cURL</p>
     <pre><span style="color:#FFAD33">curl</span> -X POST https://api.phishguard.pk/v1/scan \\
   -H <span style="color:#FF8C42">"Content-Type: application/json"</span> \\
-  -d <span style="color:#FF8C42">'{"url":"https://suspect-site.com"}'</span></pre>
-    <p style="color:#555;font-size:.75rem;font-family:var(--font-mono);margin-bottom:.35rem"># Python</p>
-    <pre><span style="color:#FFAD33">import</span> requests
-
-res = requests.<span style="color:#FF6A1C">post</span>(
-    <span style="color:#FF8C42">"https://api.phishguard.pk/v1/scan"</span>,
-    json=<span style="color:#FF8C42">{"url": "https://suspect.com"}</span>
-)
-<span style="color:#FFAD33">print</span>(res.json())</pre>`,
+  -d <span style="color:#FF8C42">'{"url":"https://suspect-site.com"}'</span></pre>`,
 
   layers: `
     <h2>ANALYSIS LAYERS</h2>
     <div class="doc-layer" style="background:rgba(255,106,28,.04);border:1px solid rgba(255,106,28,.12)">
       <div class="dl-head"><span class="dl-num" style="color:#FF6A1C">01</span><span class="dl-name" style="color:#FF6A1C">VirusTotal</span></div>
-      <p class="dl-desc">Submits the URL to the VirusTotal API, aggregating results from 92+ antivirus engines. A consensus score derives from the ratio of flagging engines.</p>
-      <div class="dl-code"><span style="color:#FF6A1C">engines_total</span>: 92 &nbsp;|&nbsp; <span style="color:#FF6A1C">engines_flagged</span>: 0-92 &nbsp;|&nbsp; <span style="color:#FF6A1C">last_analysis</span>: ISO 8601</div>
+      <p class="dl-desc">Submits the URL to the VirusTotal API, aggregating results from 92+ antivirus engines.</p>
     </div>
     <div class="doc-layer" style="background:rgba(255,173,51,.04);border:1px solid rgba(255,173,51,.12)">
       <div class="dl-head"><span class="dl-num" style="color:#FFAD33">02</span><span class="dl-name" style="color:#FFAD33">Google Safe Browsing</span></div>
-      <p class="dl-desc">Queries the Google Safe Browsing Lookup API v4 for Malware, Social Engineering, Unwanted Software, and Potentially Harmful Applications in real-time.</p>
-      <div class="dl-code"><span style="color:#FFAD33">threat_types</span>: MALWARE | SOCIAL_ENGINEERING | UNWANTED_SOFTWARE &nbsp;|&nbsp; <span style="color:#FFAD33">match</span>: boolean</div>
+      <p class="dl-desc">Queries Google Safe Browsing API v4 for Malware, Social Engineering, and Unwanted Software.</p>
     </div>
     <div class="doc-layer" style="background:rgba(255,140,66,.04);border:1px solid rgba(255,140,66,.12)">
       <div class="dl-head"><span class="dl-num" style="color:#FF8C42">03</span><span class="dl-name" style="color:#FF8C42">Domain Age</span></div>
-      <p class="dl-desc">Performs a WHOIS lookup to determine domain creation date. Domains registered within 30 days receive elevated risk scores — phishing infrastructure is typically disposable.</p>
-      <div class="dl-code"><span style="color:#FF8C42">created_date</span>: ISO 8601 &nbsp;|&nbsp; <span style="color:#FF8C42">age_days</span>: integer &nbsp;|&nbsp; <span style="color:#FF8C42">registrar</span>: string</div>
+      <p class="dl-desc">Performs a WHOIS lookup to determine domain creation date. Newly registered domains receive elevated risk scores.</p>
     </div>
     <div class="doc-layer" style="background:rgba(255,173,51,.04);border:1px solid rgba(255,173,51,.12)">
       <div class="dl-head"><span class="dl-num" style="color:#FFAD33">04</span><span class="dl-name" style="color:#FFAD33">URL Pattern Analysis</span></div>
-      <p class="dl-desc">A lightweight ML classifier analyzes structural URL features: brand keyword presence, subdomain depth, hyphen frequency, IP literals, TLD risk, and SSL absence.</p>
-      <div class="dl-code"><span style="color:#FFAD33">brand_impersonation</span>: boolean &nbsp;|&nbsp; <span style="color:#FFAD33">ip_based</span>: boolean &nbsp;|&nbsp; <span style="color:#FFAD33">ssl_present</span>: boolean</div>
+      <p class="dl-desc">Analyzes structural URL features: brand impersonation, subdomain depth, IP literals, suspicious keywords, and SSL absence.</p>
     </div>`,
 
   scoring: `
     <h2>RISK SCORING</h2>
-    <p>The risk score (0–100) is a weighted combination of all four layer outputs. Higher scores indicate greater threat likelihood.</p>
+    <p>The risk score (0–100) is a weighted combination of all four layer outputs.</p>
+    <div class="score-row" style="background:rgba(0,208,132,.07);border:1px solid rgba(0,208,132,.25)">
+      <span class="score-range" style="color:#00D084">0–14</span>
+      <div><div class="score-label" style="color:#00D084">SAFE</div><div class="score-desc">No significant threats detected.</div></div>
+    </div>
     <div class="score-row" style="background:rgba(255,173,51,.07);border:1px solid rgba(255,173,51,.25)">
-      <span class="score-range" style="color:#FFAD33">0–24</span>
-      <div><div class="score-label" style="color:#FFAD33">SAFE</div><div class="score-desc">No significant threats detected. Safe to visit with normal caution.</div></div>
+      <span class="score-range" style="color:#FFAD33">15–39</span>
+      <div><div class="score-label" style="color:#FFAD33">CAUTION</div><div class="score-desc">Some risk indicators. Verify before proceeding.</div></div>
     </div>
-    <div class="score-row" style="background:rgba(255,140,66,.07);border:1px solid rgba(255,140,66,.25)">
-      <span class="score-range" style="color:#FF8C42">25–59</span>
-      <div><div class="score-label" style="color:#FF8C42">SUSPICIOUS</div><div class="score-desc">Some risk indicators present. Verify through official channels before proceeding.</div></div>
+    <div class="score-row" style="background:rgba(255,106,28,.07);border:1px solid rgba(255,106,28,.25)">
+      <span class="score-range" style="color:#FF6A1C">40–69</span>
+      <div><div class="score-label" style="color:#FF6A1C">SUSPICIOUS</div><div class="score-desc">Multiple indicators. High risk.</div></div>
     </div>
-    <div class="score-row" style="background:rgba(255,106,28,.07);border:1px solid rgba(255,106,28,.3)">
-      <span class="score-range" style="color:#FF6A1C">60–100</span>
-      <div><div class="score-label" style="color:#FF6A1C">MALICIOUS</div><div class="score-desc">High confidence threat. Do not visit. Report to FIA Cyber Crime Wing.</div></div>
-    </div>
-    <p style="margin-top:1.25rem;margin-bottom:.75rem">Layer weight distribution:</p>
-    <div class="weight-row"><span class="wt-name">VirusTotal</span><div class="wt-bar-bg"><div class="wt-bar" style="width:35%"></div></div><span class="wt-pct">35%</span></div>
-    <div class="weight-row"><span class="wt-name">Google Safe Browsing</span><div class="wt-bar-bg"><div class="wt-bar" style="width:30%"></div></div><span class="wt-pct">30%</span></div>
-    <div class="weight-row"><span class="wt-name">Domain Age</span><div class="wt-bar-bg"><div class="wt-bar" style="width:20%"></div></div><span class="wt-pct">20%</span></div>
-    <div class="weight-row"><span class="wt-name">URL Pattern</span><div class="wt-bar-bg"><div class="wt-bar" style="width:15%"></div></div><span class="wt-pct">15%</span></div>`,
+    <div class="score-row" style="background:rgba(255,59,59,.07);border:1px solid rgba(255,59,59,.3)">
+      <span class="score-range" style="color:#FF3B3B">70–100</span>
+      <div><div class="score-label" style="color:#FF3B3B">MALICIOUS</div><div class="score-desc">Do not open. Report to FIA Cyber Crime Wing.</div></div>
+    </div>`,
 
   api: `
     <h2>API REFERENCE</h2>
     <div class="api-box">
       <div class="api-header">
         <span class="method-badge">POST</span>
-        <span style="font-family:var(--font-mono);font-size:.9rem">/v1/scan</span>
+        <span style="font-family:var(--font-mono);font-size:.9rem">/api/url</span>
       </div>
       <div class="api-body">
         <p style="color:#555;font-size:.75rem;font-family:var(--font-mono);margin-bottom:.4rem">REQUEST BODY</p>
-        <pre>{
-  <span style="color:#FF6A1C">"url"</span>: <span style="color:#FF8C42">"https://example.com"</span>,  // required
-  <span style="color:#FF6A1C">"layers"</span>: <span style="color:#FF8C42">["all"]</span>              // optional
-}</pre>
+        <pre>{ <span style="color:#FF6A1C">"url"</span>: <span style="color:#FF8C42">"https://example.com"</span> }</pre>
         <p style="color:#555;font-size:.75rem;font-family:var(--font-mono);margin-bottom:.4rem">RESPONSE</p>
         <pre>{
-  <span style="color:#FF6A1C">"verdict"</span>: <span style="color:#FF8C42">"safe"</span> | <span style="color:#FF8C42">"suspicious"</span> | <span style="color:#FF8C42">"malicious"</span>,
-  <span style="color:#FF6A1C">"score"</span>: 0-100,
-  <span style="color:#FF6A1C">"layers"</span>: {
-    <span style="color:#FFAD33">"virustotal"</span>:   { <span style="color:#FF6A1C">"engines_flagged"</span>: 0, <span style="color:#FF6A1C">"score"</span>: 5 },
-    <span style="color:#FFAD33">"safebrowsing"</span>: { <span style="color:#FF6A1C">"match"</span>: false, <span style="color:#FF6A1C">"score"</span>: 2 },
-    <span style="color:#FFAD33">"domain_age"</span>:   { <span style="color:#FF6A1C">"age_days"</span>: 1825, <span style="color:#FF6A1C">"score"</span>: 10 },
-    <span style="color:#FFAD33">"url_pattern"</span>:  { <span style="color:#FF6A1C">"ip_based"</span>: false, <span style="color:#FF6A1C">"score"</span>: 8 }
-  },
-  <span style="color:#FF6A1C">"scan_id"</span>: <span style="color:#FF8C42">"uuid"</span>,
-  <span style="color:#FF6A1C">"scanned_at"</span>: <span style="color:#FF8C42">"2024-01-15T10:30:00Z"</span>
+  <span style="color:#FF6A1C">"verdict"</span>: <span style="color:#FF8C42">"safe"</span> | <span style="color:#FF8C42">"caution"</span> | <span style="color:#FF8C42">"suspicious"</span> | <span style="color:#FF8C42">"malicious"</span>,
+  <span style="color:#FF6A1C">"risk_score"</span>: 0–100,
+  <span style="color:#FF6A1C">"scan_id"</span>: integer,
+  <span style="color:#FF6A1C">"share_token"</span>: string
 }</pre>
       </div>
-    </div>
-    <div class="rate-limit-box">
-      <div class="rl-title">⚠ RATE LIMITING</div>
-      <p style="font-size:.85rem;color:#888">Free tier: 100 requests/hour per IP. For higher limits, contact us for an API key. Response headers include <code style="font-family:var(--font-mono);color:#FF6A1C">X-RateLimit-Remaining</code> and <code style="font-family:var(--font-mono);color:#FF6A1C">X-RateLimit-Reset</code>.</p>
     </div>`
 };
 
 function showDoc(id, btn) {
-  document.getElementById('docsContent').innerHTML = docContent[id];
-  document.getElementById('docsContent').style.animation = 'none';
-  requestAnimationFrame(() => { document.getElementById('docsContent').style.animation = ''; });
+  document.getElementById('docsContent').innerHTML = docContent[id] || '';
   document.querySelectorAll('.docs-nav').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
 }
@@ -200,9 +534,3 @@ function submitForm(e) {
       <p>We will respond within 24 hours. Stay safe online.</p>
     </div>`;
 }
-
-// ── INIT ──────────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  initReveal();
-  renderDoc('overview', document.querySelector('.docs-nav'));
-});

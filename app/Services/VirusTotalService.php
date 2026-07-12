@@ -15,108 +15,121 @@ class VirusTotalService
         $this->apiKey = config('services.virustotal.key');
     }
 
-    // ─── Main Method — Call This From Controller ──────────────────────
-
-    public function scan(string $url): array
+    // ─── Called by controller — Step 1: just submit, get ID back ─────
+    public function submitUrl(string $url): ?string
     {
         try {
-            // Step 1: Submit URL and get analysis ID
-            $analysisId = $this->submitUrl($url);
+            // Check if VT already has a recent result for this URL
+            $urlId    = rtrim(strtr(base64_encode($url), '+/', '-_'), '=');
+            $existing = Http::withHeaders(['x-apikey' => $this->apiKey])
+                            ->get("{$this->baseUrl}/urls/{$urlId}");
 
-            if (!$analysisId) {
-                return $this->errorResponse('Failed to submit URL to VirusTotal');
+            if ($existing->successful()) {
+                $lastAnalysis = $existing->json('data.attributes.last_analysis_date');
+                $hoursAgo     = $lastAnalysis ? (time() - $lastAnalysis) / 3600 : 999;
+
+                // VT scanned this within last 24hrs — return existing analysis ID
+                if ($hoursAgo < 24) {
+                    Log::info("VT: Using existing analysis for URL (scanned {$hoursAgo}h ago)");
+                    return $existing->json('data.id') ?? $this->submitFresh($url);
+                }
+            }
+        } catch (\Exception $e) {
+            Log::warning('VT: Existing URL check failed, submitting fresh: ' . $e->getMessage());
+        }
+
+        return $this->submitFresh($url);
+    }
+
+    // ─── Called by controller — Step 2: poll after other checks run ──
+   public function fetchResults(string $analysisId): array
+{
+    $maxAttempts = 8;
+    $waitSeconds = 3;
+
+    for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+        try {
+            $response = Http::withHeaders(['x-apikey' => $this->apiKey])
+                            ->get("{$this->baseUrl}/analyses/{$analysisId}");
+
+            // ── 429 goes HERE — right after the request, before anything else ──
+            if ($response->status() === 429) {
+                Log::warning('VT: Rate limit hit on attempt ' . $attempt);
+                sleep(15); // wait 15 seconds then retry
+                continue;  // skip the rest of this loop iteration, try again
             }
 
-            // Step 2: Poll for results using that ID
-            $result = $this->fetchResults($analysisId);
-
-            return $result;
-
-        } catch (\Exception $e) {
-            Log::error('VirusTotal scan failed: ' . $e->getMessage());
-            return $this->errorResponse($e->getMessage());
-        }
-    }
-
-    // ─── Step 1: Submit URL to VirusTotal ────────────────────────────
-
-    private function submitUrl(string $url): ?string
-    {
-        $response = Http::withHeaders([
-            'x-apikey'     => $this->apiKey,
-            'Content-Type' => 'application/x-www-form-urlencoded',
-        ])->asForm()->post("{$this->baseUrl}/urls", [
-            'url' => $url,
-        ]);
-
-        if ($response->failed()) {
-            Log::error('VirusTotal submit failed', [
-                'status' => $response->status(),
-                'body'   => $response->body(),
-            ]);
-            return null;
-        }
-
-        // VirusTotal returns the analysis ID inside data.id
-        return $response->json('data.id');
-    }
-
-    // ─── Step 2: Fetch Results Using Analysis ID ─────────────────────
-
-    private function fetchResults(string $analysisId): array
-    {
-        $maxAttempts = 10;   // try max 10 times
-        $waitSeconds = 3;    // wait 3 seconds between each attempt
-
-        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
-
-            $response = Http::withHeaders([
-                'x-apikey' => $this->apiKey,
-            ])->get("{$this->baseUrl}/analyses/{$analysisId}");
-
             if ($response->failed()) {
-                return $this->errorResponse('Failed to fetch analysis results');
+                return $this->errorResponse('VT analysis fetch failed: ' . $response->status());
             }
 
             $data   = $response->json();
             $status = $data['data']['attributes']['status'] ?? 'pending';
 
-            // VirusTotal returns "completed" when all engines are done
             if ($status === 'completed') {
                 return $this->formatResult($data);
             }
 
-            // Not ready yet — wait and try again
             if ($attempt < $maxAttempts) {
                 sleep($waitSeconds);
             }
-        }
 
-        return $this->errorResponse('VirusTotal analysis timed out — try again');
+        } catch (\Exception $e) {
+            Log::error('VT fetchResults exception: ' . $e->getMessage());
+            return $this->errorResponse($e->getMessage());
+        }
     }
 
-    // ─── Format The Raw Response Into Your Clean Structure ───────────
+    return $this->errorResponse('VirusTotal rate limit reached — wait 1 minute and re-scan');
+}
+    // ─── Convenience method (not used by controller anymore) ─────────
+    public function scan(string $url): array
+    {
+        $analysisId = $this->submitUrl($url);
+        if (!$analysisId) {
+            return $this->errorResponse('Failed to submit URL to VirusTotal');
+        }
+        return $this->fetchResults($analysisId);
+    }
 
+    // ─── Private: fresh submission ────────────────────────────────────
+    private function submitFresh(string $url): ?string
+    {
+        try {
+            $response = Http::withHeaders([
+                'x-apikey'     => $this->apiKey,
+                'Content-Type' => 'application/x-www-form-urlencoded',
+            ])->asForm()->post("{$this->baseUrl}/urls", ['url' => $url]);
+
+            if ($response->failed()) {
+                Log::error('VT submit failed: ' . $response->status() . ' — ' . $response->body());
+                return null;
+            }
+
+            return $response->json('data.id');
+
+        } catch (\Exception $e) {
+            Log::error('VT submitFresh exception: ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    // ─── Format raw VT response ───────────────────────────────────────
     private function formatResult(array $data): array
     {
-        $stats = $data['data']['attributes']['stats'] ?? [];
-
+        $stats      = $data['data']['attributes']['stats'] ?? [];
         $malicious  = $stats['malicious']  ?? 0;
         $suspicious = $stats['suspicious'] ?? 0;
         $harmless   = $stats['harmless']   ?? 0;
         $undetected = $stats['undetected'] ?? 0;
         $total      = $malicious + $suspicious + $harmless + $undetected;
 
-        // Individual engine results — useful for showing detail
-        $engineResults = $data['data']['attributes']['results'] ?? [];
-
-        // Only pull engines that actually flagged something
-        $flaggedEngines = collect($engineResults)
-            ->filter(fn($engine) => in_array($engine['category'], ['malicious', 'suspicious']))
-            ->map(fn($engine, $name) => [
+        $flaggedEngines = collect($data['data']['attributes']['results'] ?? [])
+            ->filter(fn($e) => in_array($e['category'], ['malicious', 'suspicious']))
+            ->map(fn($e, $name) => [
                 'engine'   => $name,
-                'category' => $engine['category'],
-                'result'   => $engine['result'],
+                'category' => $e['category'],
+                'result'   => $e['result'],
             ])
             ->values()
             ->toArray();
@@ -135,19 +148,11 @@ class VirusTotalService
         ];
     }
 
-    // ─── Risk Score From VirusTotal (max 50 points) ───────────────────
-
     private function calculateScore(int $malicious, int $suspicious, int $total): int
     {
         if ($total === 0) return 0;
-
-        $maliciousWeight  = ($malicious  / $total) * 50;
-        $suspiciousWeight = ($suspicious / $total) * 20;
-
-        return (int) min($maliciousWeight + $suspiciousWeight, 50);
+        return (int) min(($malicious / $total) * 50 + ($suspicious / $total) * 20, 50);
     }
-
-    // ─── Verdict Based On Engine Count ───────────────────────────────
 
     private function getVerdict(int $malicious, int $suspicious): string
     {
@@ -158,22 +163,14 @@ class VirusTotalService
         return 'safe';
     }
 
-    // ─── Human Readable Summary ───────────────────────────────────────
-
     private function getSummary(int $malicious, int $suspicious, int $total): string
     {
-        if ($malicious > 0) {
-            return "{$malicious} out of {$total} security engines flagged this URL as malicious";
-        }
-        if ($suspicious > 0) {
-            return "{$suspicious} out of {$total} security engines found this URL suspicious";
-        }
+        if ($malicious > 0) return "{$malicious} out of {$total} security engines flagged this URL as malicious";
+        if ($suspicious > 0) return "{$suspicious} out of {$total} engines found this URL suspicious";
         return "No security engines flagged this URL out of {$total} checked";
     }
 
-    // ─── Error Structure ─────────────────────────────────────────────
-
-    private function errorResponse(string $message): array
+    public function errorResponse(string $message): array
     {
         return [
             'status'          => 'error',

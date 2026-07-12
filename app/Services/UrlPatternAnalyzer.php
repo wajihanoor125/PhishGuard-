@@ -92,62 +92,58 @@ class UrlPatternAnalyzer
     }
 
     // ─── Check 3: Suspicious Keywords ────────────────────────────────
+private function checkSuspiciousKeywords(): void
+{
+    $keywords = [
+        // Account & login
+        'login', 'signin', 'sign-in', 'log-in', 'logon',
 
-    private function checkSuspiciousKeywords(): void
-    {
-        $keywords = [
-            // Account & login
-            'login', 'signin', 'sign-in', 'log-in', 'logon',
+        // Verification
+        'verify', 'verification', 'validate', 'confirm', 'authenticate',
 
-            // Verification
-            'verify', 'verification', 'validate', 'confirm', 'authenticate',
+        // Account actions
+        'account', 'update', 'secure', 'security', 'password', 'reset',
 
-            // Account actions
-            'account', 'update', 'secure', 'security', 'password', 'reset',
+        // Financial actions (generic only — no brand names here)
+        'banking', 'payment', 'wallet', 'transfer', 'transaction',
+    ];
 
-            // Financial
-            'banking', 'payment', 'wallet', 'transfer', 'transaction',
+    $fullUrl = strtolower($this->url);
+    $matched = [];
 
-            // Pakistani context
-            'easypaisa', 'jazzcash', 'nayapay', 'sadapay', 'nadra', 'fbr',
-        ];
-
-        $fullUrl  = strtolower($this->url);
-        $matched  = [];
-
-        foreach ($keywords as $keyword) {
-            if (str_contains($fullUrl, $keyword)) {
-                $matched[] = $keyword;
-            }
-        }
-
-        if (count($matched) >= 3) {
-            $this->flags[] = [
-                'check'    => 'Suspicious Keywords',
-                'status'   => 'fail',
-                'message'  => 'Multiple suspicious keywords found: ' . implode(', ', $matched),
-                'severity' => 'high',
-            ];
-            $this->score += 20;
-
-        } elseif (count($matched) > 0) {
-            $this->flags[] = [
-                'check'    => 'Suspicious Keywords',
-                'status'   => 'warn',
-                'message'  => 'Suspicious keyword found in URL: ' . implode(', ', $matched),
-                'severity' => 'medium',
-            ];
-            $this->score += 10;
-
-        } else {
-            $this->flags[] = [
-                'check'    => 'Suspicious Keywords',
-                'status'   => 'pass',
-                'message'  => 'No suspicious keywords found',
-                'severity' => 'none',
-            ];
+    foreach ($keywords as $keyword) {
+        if (str_contains($fullUrl, $keyword)) {
+            $matched[] = $keyword;
         }
     }
+
+    if (count($matched) >= 3) {
+        $this->flags[] = [
+            'check'    => 'Suspicious Keywords',
+            'status'   => 'fail',
+            'message'  => 'Multiple suspicious keywords found: ' . implode(', ', $matched),
+            'severity' => 'high',
+        ];
+        $this->score += 20;
+
+    } elseif (count($matched) > 0) {
+        $this->flags[] = [
+            'check'    => 'Suspicious Keywords',
+            'status'   => 'warn',
+            'message'  => 'Suspicious keyword found in URL: ' . implode(', ', $matched),
+            'severity' => 'medium',
+        ];
+        $this->score += 10;
+
+    } else {
+        $this->flags[] = [
+            'check'    => 'Suspicious Keywords',
+            'status'   => 'pass',
+            'message'  => 'No suspicious keywords found',
+            'severity' => 'none',
+        ];
+    }
+}
 
     // ─── Check 4: IP Address in URL ──────────────────────────────────
 
