@@ -59,7 +59,16 @@
             </div>
             <p class="url-error mono" id="urlError"></p>
 
-            
+            <div class="scan-progress" id="scanProgress" aria-live="polite" aria-label="Scan progress">
+              <div class="scan-progress-head">
+                <span class="mono scan-progress-label">SCAN PROGRESS</span>
+                <span class="mono scan-progress-text" id="scanProgressText">0%</span>
+              </div>
+              <div class="scan-progress-track">
+                <div class="scan-progress-bar" id="scanProgressBar"></div>
+              </div>
+              <div class="mono scan-progress-caption" id="scanProgressCaption">Preparing scan…</div>
+            </div>
 
             <!-- Layer progress -->
             <div class="layer-progress" id="layerProgress">
@@ -218,8 +227,8 @@
           <div class="team-wrap">
             <p class="section-tag mono" style="margin-bottom:1.5rem">THE TEAM</p>
             <div class="team-grid">
-              <div class="team-card card-hover reveal"><div class="avatar">SM</div><h4>Samar Minallah</h4><p class="orange mono" style="font-size:.7rem">Founder &amp; Security Engineer</p><p class="muted" style="font-size:.8rem;margin-top:.3rem">5 years in cybersecurity, ex-NUST</p></div>
-              <div class="team-card card-hover reveal"><div class="avatar">WN</div><h4>Wajiha Noor</h4><p class="orange mono" style="font-size:.7rem">Backend Engineer</p><p class="muted" style="font-size:.8rem;margin-top:.3rem">Python, threat intelligence APIs</p></div>
+              <div class="team-card card-hover reveal"><div class="avatar">SM</div><h4>Samar Minallah</h4><p class="orange mono" style="font-size:.7rem">Founder &amp; Web Developer</p><p class="muted" style="font-size:.8rem;margin-top:.3rem">1 year in web development</p></div>
+              <div class="team-card card-hover reveal"><div class="avatar">WN</div><h4>Wajiha Noor</h4><p class="orange mono" style="font-size:.7rem">Frontend Engineer</p><p class="muted" style="font-size:.8rem;margin-top:.3rem">1 year in web development</p></div>
              
             </div>
           </div>

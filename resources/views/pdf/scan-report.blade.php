@@ -125,9 +125,9 @@
     {{-- VirusTotal --}}
     <div class="check-card">
       <div class="check-name">VIRUSTOTAL</div>
-      @if(($vt['status'] ?? '') === 'error')
-        <div class="check-verdict status-error">TIMEOUT</div>
-        <div class="check-detail">Analysis could not complete. Re-scan recommended.</div>
+      @if(($vt['status'] ?? '') === 'error' || ($vt['status'] ?? '') === 'unavailable')
+        <div class="check-verdict status-warning">UNAVAILABLE</div>
+        <div class="check-detail">{{ $vt['message'] ?? 'VirusTotal is temporarily unavailable. Other checks still completed normally.' }}</div>
       @else
         <div class="check-verdict {{ ($vt['malicious'] ?? 0) > 0 ? 'status-danger' : 'status-safe' }}">
           {{ ($vt['malicious'] ?? 0) > 0 ? 'FLAGGED' : 'CLEAN' }}

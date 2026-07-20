@@ -9,19 +9,32 @@ class VirusTotalService
 {
     private string $apiKey;
     private string $baseUrl = 'https://www.virustotal.com/api/v3';
+    private int $timeout;
+    private int $maxAttempts;
+    private int $waitSeconds;
 
-    public function __construct()
+    public function __construct(?string $apiKey = null, array $options = [])
     {
-        $this->apiKey = config('services.virustotal.key');
+        $this->apiKey = $apiKey ?? config('services.virustotal.key');
+        $this->timeout = (int) ($options['timeout'] ?? config('services.virustotal.timeout', 8));
+        $this->maxAttempts = (int) ($options['maxAttempts'] ?? config('services.virustotal.max_attempts', 3));
+        $this->waitSeconds = (int) ($options['waitSeconds'] ?? config('services.virustotal.wait_seconds', 2));
     }
 
     // ─── Called by controller — Step 1: just submit, get ID back ─────
     public function submitUrl(string $url): ?string
     {
+        if (blank($this->apiKey)) {
+            Log::warning('VT: No API key configured; skipping submission.');
+            return null;
+        }
+
         try {
             // Check if VT already has a recent result for this URL
             $urlId    = rtrim(strtr(base64_encode($url), '+/', '-_'), '=');
             $existing = Http::withHeaders(['x-apikey' => $this->apiKey])
+                            ->timeout($this->timeout)
+                            ->connectTimeout(5)
                             ->get("{$this->baseUrl}/urls/{$urlId}");
 
             if ($existing->successful()) {
@@ -34,7 +47,7 @@ class VirusTotalService
                     return $existing->json('data.id') ?? $this->submitFresh($url);
                 }
             }
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::warning('VT: Existing URL check failed, submitting fresh: ' . $e->getMessage());
         }
 
@@ -42,46 +55,55 @@ class VirusTotalService
     }
 
     // ─── Called by controller — Step 2: poll after other checks run ──
-   public function fetchResults(string $analysisId): array
-{
-    $maxAttempts = 8;
-    $waitSeconds = 3;
-
-    for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
-        try {
-            $response = Http::withHeaders(['x-apikey' => $this->apiKey])
-                            ->get("{$this->baseUrl}/analyses/{$analysisId}");
-
-            // ── 429 goes HERE — right after the request, before anything else ──
-            if ($response->status() === 429) {
-                Log::warning('VT: Rate limit hit on attempt ' . $attempt);
-                sleep(15); // wait 15 seconds then retry
-                continue;  // skip the rest of this loop iteration, try again
-            }
-
-            if ($response->failed()) {
-                return $this->errorResponse('VT analysis fetch failed: ' . $response->status());
-            }
-
-            $data   = $response->json();
-            $status = $data['data']['attributes']['status'] ?? 'pending';
-
-            if ($status === 'completed') {
-                return $this->formatResult($data);
-            }
-
-            if ($attempt < $maxAttempts) {
-                sleep($waitSeconds);
-            }
-
-        } catch (\Exception $e) {
-            Log::error('VT fetchResults exception: ' . $e->getMessage());
-            return $this->errorResponse($e->getMessage());
+    public function fetchResults(string $analysisId): array
+    {
+        if (blank($this->apiKey)) {
+            return $this->unavailableResponse('VirusTotal API key is not configured.');
         }
-    }
 
-    return $this->errorResponse('VirusTotal rate limit reached — wait 1 minute and re-scan');
-}
+        for ($attempt = 1; $attempt <= $this->maxAttempts; $attempt++) {
+            try {
+                $response = Http::withHeaders(['x-apikey' => $this->apiKey])
+                                ->timeout($this->timeout)
+                                ->connectTimeout(5)
+                                ->get("{$this->baseUrl}/analyses/{$analysisId}");
+
+                if ($response->status() === 429) {
+                    Log::warning('VT: Rate limit hit on attempt ' . $attempt);
+                    if ($attempt < $this->maxAttempts) {
+                        sleep(10);
+                    }
+                    continue;
+                }
+
+                if ($response->failed()) {
+                    Log::warning('VT analysis fetch failed: ' . $response->status());
+                    return $this->unavailableResponse('VirusTotal is temporarily unavailable.');
+                }
+
+                $data   = $response->json();
+                $status = $data['data']['attributes']['status'] ?? 'pending';
+
+                if ($status === 'completed') {
+                    return $this->formatResult($data);
+                }
+
+                if ($attempt < $this->maxAttempts) {
+                    sleep($this->waitSeconds);
+                }
+
+            } catch (\Throwable $e) {
+                Log::warning('VT fetchResults exception: ' . $e->getMessage());
+                if ($attempt < $this->maxAttempts) {
+                    sleep($this->waitSeconds);
+                    continue;
+                }
+                return $this->unavailableResponse('VirusTotal is temporarily unavailable. Please try again in a moment.');
+            }
+        }
+
+        return $this->unavailableResponse('VirusTotal did not finish processing this URL in time.');
+    }
     // ─── Convenience method (not used by controller anymore) ─────────
     public function scan(string $url): array
     {
@@ -95,21 +117,27 @@ class VirusTotalService
     // ─── Private: fresh submission ────────────────────────────────────
     private function submitFresh(string $url): ?string
     {
+        if (blank($this->apiKey)) {
+            return null;
+        }
+
         try {
             $response = Http::withHeaders([
                 'x-apikey'     => $this->apiKey,
                 'Content-Type' => 'application/x-www-form-urlencoded',
-            ])->asForm()->post("{$this->baseUrl}/urls", ['url' => $url]);
+            ])->timeout($this->timeout)
+            ->connectTimeout(5)
+            ->asForm()->post("{$this->baseUrl}/urls", ['url' => $url]);
 
             if ($response->failed()) {
-                Log::error('VT submit failed: ' . $response->status() . ' — ' . $response->body());
+                Log::warning('VT submit failed: ' . $response->status() . ' — ' . $response->body());
                 return null;
             }
 
             return $response->json('data.id');
 
-        } catch (\Exception $e) {
-            Log::error('VT submitFresh exception: ' . $e->getMessage());
+        } catch (\Throwable $e) {
+            Log::warning('VT submitFresh exception: ' . $e->getMessage());
             return null;
         }
     }
@@ -172,8 +200,13 @@ class VirusTotalService
 
     public function errorResponse(string $message): array
     {
+        return $this->unavailableResponse($message);
+    }
+
+    public function unavailableResponse(string $message): array
+    {
         return [
-            'status'          => 'error',
+            'status'          => 'unavailable',
             'message'         => $message,
             'malicious'       => 0,
             'suspicious'      => 0,
@@ -183,7 +216,7 @@ class VirusTotalService
             'flagged_engines' => [],
             'risk_score'      => 0,
             'verdict'         => 'unknown',
-            'summary'         => 'VirusTotal check could not be completed',
+            'summary'         => 'VirusTotal is temporarily unavailable',
         ];
     }
 }

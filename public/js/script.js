@@ -66,6 +66,8 @@ function initReveal() {
 }
 
 // ── SCANNER: INTERCEPT FORM ───────────────────────────────────────────────────
+let scanProgressTimer = null;
+
 document.addEventListener('DOMContentLoaded', () => {
   initReveal();
   renderDoc('overview', document.querySelector('.docs-nav'));
@@ -74,15 +76,68 @@ document.addEventListener('DOMContentLoaded', () => {
   if (form) form.addEventListener('submit', handleScan);
 });
 
+function startScanProgress() {
+  const progress = document.getElementById('scanProgress');
+  const bar = document.getElementById('scanProgressBar');
+  const text = document.getElementById('scanProgressText');
+  const caption = document.getElementById('scanProgressCaption');
+
+  if (!progress || !bar || !text || !caption) return null;
+
+  progress.classList.add('active');
+  progress.style.display = 'block';
+  bar.style.width = '0%';
+  text.textContent = '0%';
+  caption.textContent = 'Preparing scan…';
+
+  clearInterval(scanProgressTimer);
+
+  const stages = [
+    { percent: 16, label: 'Preparing scan…' },
+    { percent: 34, label: 'Checking URL structure…' },
+    { percent: 58, label: 'Running security checks…' },
+    { percent: 80, label: 'Combining threat signals…' },
+    { percent: 94, label: 'Finalizing verdict…' }
+  ];
+
+  let index = 0;
+  const tick = () => {
+    const stage = stages[index];
+    if (!stage) return;
+    bar.style.width = `${stage.percent}%`;
+    text.textContent = `${stage.percent}%`;
+    caption.textContent = stage.label;
+    index += 1;
+  };
+
+  tick();
+  scanProgressTimer = setInterval(tick, 650);
+  return scanProgressTimer;
+}
+
+function finishScanProgress() {
+  const progress = document.getElementById('scanProgress');
+  const bar = document.getElementById('scanProgressBar');
+  const text = document.getElementById('scanProgressText');
+  const caption = document.getElementById('scanProgressCaption');
+
+  if (!progress || !bar || !text || !caption) return;
+
+  clearInterval(scanProgressTimer);
+  bar.style.width = '100%';
+  text.textContent = '100%';
+  caption.textContent = 'Results ready';
+}
+
 async function handleScan(e) {
   e.preventDefault();
 
-  const url         = document.getElementById('urlInput').value.trim();
-  const resultsDiv  = document.getElementById('scanResults');
-  const layerProg   = document.getElementById('layerProgress');
+  const url = document.getElementById('urlInput').value.trim();
+  const resultsDiv = document.getElementById('scanResults');
+  const layerProg = document.getElementById('layerProgress');
   const scanningInd = document.getElementById('scanningInd');
-  const scanBeam    = document.getElementById('scanBeam');
-  const urlError    = document.getElementById('urlError');
+  const scanBeam = document.getElementById('scanBeam');
+  const urlError = document.getElementById('urlError');
 
   if (!url) { urlError.textContent = 'Please enter a URL to scan.'; return; }
 
@@ -92,17 +147,18 @@ async function handleScan(e) {
 
   // Show scanning UI
   scanningInd.style.display = 'flex';
-  scanBeam.style.display    = 'block';
-  layerProg.style.display   = 'block';
+  scanBeam.style.display = 'block';
+  layerProg.style.display = 'block';
+  startScanProgress();
 
   // Animate all 4 layer dots to "checking"
   for (let i = 0; i < 4; i++) {
     const dot = document.getElementById(`ld${i}`);
     const stat = document.getElementById(`ls${i}`);
     dot.style.background = '#FFAD33';
-    dot.style.boxShadow  = '0 0 8px #FFAD33';
-    stat.textContent     = 'CHECKING...';
-    stat.style.color     = '#FFAD33';
+    dot.style.boxShadow = '0 0 8px #FFAD33';
+    stat.textContent = 'CHECKING...';
+    stat.style.color = '#FFAD33';
   }
 
   try {
@@ -126,13 +182,15 @@ async function handleScan(e) {
       return;
     }
 
+    finishScanProgress();
+
     // Update layer dots with real results
     updateLayerDots(data);
 
     // Brief pause so user sees the results, then render
     setTimeout(() => {
       scanningInd.style.display = 'none';
-      scanBeam.style.display    = 'none';
+      scanBeam.style.display = 'none';
       renderResults(data, resultsDiv);
     }, 900);
 
@@ -143,8 +201,21 @@ async function handleScan(e) {
 }
 
 function resetScanState() {
-  document.getElementById('scanningInd').style.display  = 'none';
-  document.getElementById('scanBeam').style.display     = 'none';
+  clearInterval(scanProgressTimer);
+  const progress = document.getElementById('scanProgress');
+  const bar = document.getElementById('scanProgressBar');
+  const text = document.getElementById('scanProgressText');
+  const caption = document.getElementById('scanProgressCaption');
+
+  if (progress) {
+    progress.classList.remove('active');
+    progress.style.display = 'none';
+  }
+  if (bar) bar.style.width = '0%';
+  if (text) text.textContent = '0%';
+  if (caption) caption.textContent = 'Preparing scan…';
+  document.getElementById('scanningInd').style.display = 'none';
+  document.getElementById('scanBeam').style.display = 'none';
   document.getElementById('layerProgress').style.display = 'none';
 }
 
@@ -157,35 +228,35 @@ function updateLayerDots(data) {
   ];
 
   layers.forEach((result, i) => {
-    const dot  = document.getElementById(`ld${i}`);
+    const dot = document.getElementById(`ld${i}`);
     const stat = document.getElementById(`ls${i}`);
     dot.style.animation = 'none';
 
-    if (!result || result.status === 'error') {
-      dot.style.background = '#FF3B3B';
-      dot.style.boxShadow  = '0 0 8px #FF3B3B';
-      stat.textContent     = 'ERROR';
-      stat.style.color     = '#FF3B3B';
+    if (!result || result.status === 'error' || result.status === 'unavailable') {
+      dot.style.background = '#FFAD33';
+      dot.style.boxShadow = '0 0 8px #FFAD33';
+      stat.textContent = 'UNAVAILABLE';
+      stat.style.color = '#FFAD33';
     } else if (result.status === 'unknown') {
       dot.style.background = '#666';
-      dot.style.boxShadow  = 'none';
-      stat.textContent     = 'UNKNOWN';
-      stat.style.color     = '#666';
+      dot.style.boxShadow = 'none';
+      stat.textContent = 'UNKNOWN';
+      stat.style.color = '#666';
     } else if (result.verdict === 'malicious' || result.verdict === 'suspicious' || result.flagged || result.is_impersonating) {
       dot.style.background = '#FF6A1C';
-      dot.style.boxShadow  = '0 0 8px #FF6A1C';
-      stat.textContent     = 'THREAT FOUND';
-      stat.style.color     = '#FF6A1C';
+      dot.style.boxShadow = '0 0 8px #FF6A1C';
+      stat.textContent = 'THREAT FOUND';
+      stat.style.color = '#FF6A1C';
     } else if (result.verdict === 'caution' || result.is_new) {
       dot.style.background = '#FFAD33';
-      dot.style.boxShadow  = '0 0 8px #FFAD33';
-      stat.textContent     = 'CAUTION';
-      stat.style.color     = '#FFAD33';
+      dot.style.boxShadow = '0 0 8px #FFAD33';
+      stat.textContent = 'CAUTION';
+      stat.style.color = '#FFAD33';
     } else {
       dot.style.background = '#00D084';
-      dot.style.boxShadow  = '0 0 8px #00D084';
-      stat.textContent     = 'CLEAN';
-      stat.style.color     = '#00D084';
+      dot.style.boxShadow = '0 0 8px #00D084';
+      stat.textContent = 'CLEAN';
+      stat.style.color = '#00D084';
     }
   });
 }
@@ -193,12 +264,12 @@ function updateLayerDots(data) {
 // ── RESULTS RENDERER ──────────────────────────────────────────────────────────
 function renderResults(data, container) {
   const vCfg = {
-    malicious:  { color: '#FF3B3B', bg: 'rgba(255,59,59,0.06)',   border: 'rgba(255,59,59,0.2)',   label: 'MALICIOUS'  },
-    suspicious: { color: '#FF6A1C', bg: 'rgba(255,106,28,0.06)',  border: 'rgba(255,106,28,0.2)',  label: 'SUSPICIOUS' },
-    caution:    { color: '#FFAD33', bg: 'rgba(255,173,51,0.06)',  border: 'rgba(255,173,51,0.2)',  label: 'CAUTION'    },
-    safe:       { color: '#00D084', bg: 'rgba(0,208,132,0.06)',   border: 'rgba(0,208,132,0.2)',   label: 'SAFE'       },
+    malicious: { color: '#FF3B3B', bg: 'rgba(255,59,59,0.06)', border: 'rgba(255,59,59,0.2)', label: 'MALICIOUS' },
+    suspicious: { color: '#FF6A1C', bg: 'rgba(255,106,28,0.06)', border: 'rgba(255,106,28,0.2)', label: 'SUSPICIOUS' },
+    caution: { color: '#FFAD33', bg: 'rgba(255,173,51,0.06)', border: 'rgba(255,173,51,0.2)', label: 'CAUTION' },
+    safe: { color: '#00D084', bg: 'rgba(0,208,132,0.06)', border: 'rgba(0,208,132,0.2)', label: 'SAFE' },
   };
-  const v     = vCfg[data.verdict] || vCfg.safe;
+  const v = vCfg[data.verdict] || vCfg.safe;
   const sColor = data.risk_score >= 70 ? '#FF3B3B' : data.risk_score >= 40 ? '#FF6A1C' : data.risk_score >= 15 ? '#FFAD33' : '#00D084';
   const scannedAt = new Date(data.scanned_at).toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' });
 
@@ -216,13 +287,13 @@ function renderResults(data, container) {
             <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="${v.color}" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           </div>
           <div>
-            <div style="font-family:'Orbitron',sans-serif;font-size:1.5rem;font-weight:900;color:${v.color};letter-spacing:.04em;">${v.label}</div>
+            <div id="verdictLabel" style="font-family:'Orbitron',sans-serif;font-size:1.5rem;font-weight:900;color:${v.color};letter-spacing:.04em;">${v.label}</div>
             <div style="font-family:'JetBrains Mono',monospace;font-size:.65rem;color:#555;margin-top:.2rem;">SCANNED · ${scannedAt} ${data.source === 'cache' ? '· <span style="color:#444">CACHED</span>' : ''}</div>
           </div>
         </div>
         <!-- Right: score -->
         <div style="text-align:center;min-width:100px;">
-          <div style="font-family:'Orbitron',sans-serif;font-size:2.4rem;font-weight:900;color:${sColor};line-height:1;">${data.risk_score}</div>
+          <div id="riskScore" style="font-family:'Orbitron',sans-serif;font-size:2.4rem;font-weight:900;color:${sColor};line-height:1;">${data.risk_score}</div>
           <div style="font-family:'JetBrains Mono',monospace;font-size:.6rem;color:#555;letter-spacing:.08em;">/100 RISK SCORE</div>
           <div style="margin-top:.5rem;height:3px;background:rgba(255,255,255,0.05);border-radius:2px;overflow:hidden;">
             <div style="height:100%;width:0;background:${sColor};border-radius:2px;transition:width 1.2s cubic-bezier(.4,0,.2,1);" id="riskBar"></div>
@@ -274,30 +345,110 @@ function renderResults(data, container) {
     }, 100);
   });
 
+  if (data.virustotal_result?.status === 'pending') {
+    startVtPolling(data.scan_id);
+  }
+
   container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ── VT POLLER ───────────────────────────────────────────────────────────────
+function startVtPolling(scanId) {
+  let attempts = 0;
+  const maxPolls = 20;
+  const interval = 4000;
+
+  const poller = setInterval(async () => {
+    attempts++;
+
+    if (attempts > maxPolls) {
+      clearInterval(poller);
+      updateVtCard({ status: 'error', summary: 'VT analysis timed out' });
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/scan/${scanId}/vt-status`);
+      const data = await res.json();
+
+      if (data.vt_ready) {
+        clearInterval(poller);
+        updateVtCard(data.virustotal_result);
+        updateScoreAndVerdict(data.risk_score, data.verdict);
+      }
+    } catch (err) {
+      console.error('VT poll error:', err);
+    }
+  }, interval);
+}
+
+function updateVtCard(vt) {
+  const card = document.getElementById('vt-card');
+  if (card) {
+    card.outerHTML = buildVtCard(vt);
+  }
+}
+
+function updateScoreAndVerdict(score, verdict) {
+  const scoreEl = document.getElementById('riskScore');
+  const bar = document.getElementById('riskBar');
+  const vEl = document.getElementById('verdictLabel');
+
+  const colors = {
+    malicious: '#FF3B3B',
+    suspicious: '#FF6A1C',
+    caution: '#FFAD33',
+    safe: '#00D084',
+  };
+
+  const color = colors[verdict] || '#00D084';
+
+  if (scoreEl) {
+    scoreEl.textContent = score;
+    scoreEl.style.color = color;
+  }
+
+  if (bar) {
+    bar.style.width = score + '%';
+    bar.style.background = color;
+  }
+
+  if (vEl) {
+    vEl.textContent = (verdict || 'safe').toUpperCase();
+    vEl.style.color = color;
+  }
 }
 
 // ── CARD BUILDERS ─────────────────────────────────────────────────────────────
 
 function buildVtCard(vt) {
-  if (!vt || vt.status === 'error') {
-    return checkCard('VirusTotal', '#FF3B3B', 'ERROR',
-      'Analysis timed out',
-      `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#FF3B3B" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`,
-      'Re-scan recommended'
-    );
+  if (!vt || vt.status === 'error' || vt.status === 'unavailable') {
+    const title = 'VirusTotal temporarily unavailable';
+    const body = 'This layer could not be completed right now. The scan results below remain useful, and the report can still be reviewed.';
+    return `
+      <div id="vt-card" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.07);border-radius:.75rem;padding:1.1rem 1.25rem;border-top:2px solid #FFAD33;min-height:150px;display:flex;flex-direction:column;justify-content:space-between;box-sizing:border-box;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:.6rem;letter-spacing:.1em;color:#444;margin-bottom:.7rem;">VIRUSTOTAL</div>
+        <div style="display:flex;align-items:center;gap:.45rem;margin-bottom:.65rem;flex-wrap:wrap;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#FFAD33" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span style="font-family:'Orbitron',sans-serif;font-size:.75rem;font-weight:700;color:#FFAD33;">UNAVAILABLE</span>
+        </div>
+        <div style="font-family:'Inter',sans-serif;font-size:.72rem;color:#666;line-height:1.5;overflow-wrap:anywhere;">
+          <div style="font-weight:600;color:#777;margin-bottom:.3rem;">${escHtml(title)}</div>
+          <div>${escHtml(body)}</div>
+        </div>
+      </div>`;
   }
-  const flagged  = (vt.malicious || 0) > 0;
-  const color    = flagged ? '#FF3B3B' : '#00D084';
-  const label    = flagged ? 'FLAGGED' : 'CLEAN';
-  const icon     = flagged
+  const flagged = (vt.malicious || 0) > 0;
+  const color = flagged ? '#FF3B3B' : '#00D084';
+  const label = flagged ? 'FLAGGED' : 'CLEAN';
+  const icon = flagged
     ? `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`
     : `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>`;
 
-  return checkCard('VirusTotal', color, label, icon,
+  return `<div id="vt-card">${checkCard('VirusTotal', color, label, icon,
     `${vt.malicious || 0} malicious · ${vt.suspicious || 0} suspicious`,
     `${vt.total_engines || 0} engines checked`
-  );
+  )}</div>`;
 }
 
 function buildGsbCard(gsb) {
@@ -308,9 +459,9 @@ function buildGsbCard(gsb) {
     );
   }
   const flagged = gsb.flagged;
-  const color   = flagged ? '#FF3B3B' : '#00D084';
-  const label   = flagged ? 'THREAT' : 'CLEAN';
-  const icon    = flagged
+  const color = flagged ? '#FF3B3B' : '#00D084';
+  const label = flagged ? 'THREAT' : 'CLEAN';
+  const icon = flagged
     ? `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>`
     : `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>`;
 
@@ -337,7 +488,7 @@ function buildDomainCard(domain) {
   const isNew = domain.is_new;
   const color = isNew ? '#FF6A1C' : '#00D084';
   const label = isNew ? 'NEW DOMAIN' : 'ESTABLISHED';
-  const icon  = isNew
+  const icon = isNew
     ? `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>`
     : `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>`;
 
@@ -357,7 +508,7 @@ function buildBrandCard(brand) {
   const impersonating = brand.is_impersonating;
   const color = impersonating ? '#FF3B3B' : '#00D084';
   const label = impersonating ? 'DETECTED' : 'NONE';
-  const icon  = impersonating
+  const icon = impersonating
     ? `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`
     : `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>`;
 

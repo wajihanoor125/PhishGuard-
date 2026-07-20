@@ -10,3 +10,5 @@ Route::get('/user', function (Request $request) {
 
 // Scan URL Route
 Route::post('/url',[UrlSubmitController::class,'scan'])->name('urlscan');
+
+Route::get('/scan/{id}/vt-status', [UrlSubmitController::class, 'vtStatus'])->name('vt.status');
